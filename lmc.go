@@ -25,14 +25,14 @@ func main() {
 		CredentialsFilename: "credentials",
 		APIHost: "http://localhost:8080/api/",
 	}
-	user, err := setup(config)
+	userCredentials, err := setup(config)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
 	auth := Auth{}
 	auth.Config = config
-	auth.User = user
+	auth.UserCredentials = userCredentials
 	// colors
 	green := color.New(color.FgGreen)
 	red := color.New(color.FgRed)
@@ -52,7 +52,7 @@ func main() {
 		// Identify command by first argument
 		switch strings.TrimSpace(args[0]) {
 		case "ua":
-			newUser, err := addUser(config, user)
+			newUser, err := addUser(&auth)
 			if err == nil {
 				blue.Printf("User created %v\n", newUser)
 			} else {
@@ -71,7 +71,7 @@ func main() {
 			if err != nil {
 				red.Printf("%v\n", err)
 			} else {
-				green.Printf("Authorised OK. User ID: %s\n", auth.UserID)
+				green.Printf("Authorised OK. User ID: %s\n", auth.UserAuth.User.ID)
 			}
 		case "credentials":
 			_, _, err = readAndSaveUserCredentials(config.Dir + string(filepath.Separator) + config.CredentialsFilename)
@@ -92,7 +92,7 @@ func main() {
 				} else {
 					switch link.(type) {
 					case *Link:
-						link, err := addLink(config, user, link.(*Link))
+						link, err := addLink(&auth, link.(*Link))
 						if err == nil {
 							blue.Printf("Item created %v\n", link)
 						} else {
@@ -107,7 +107,7 @@ func main() {
 	}
 }
 
-func setup(config *Config) (*User, error) {
+func setup(config *Config) (*UserCredentials, error) {
 	// Check if folder exists
 	if _, err := os.Stat(config.Dir); os.IsNotExist(err) {
 		err = os.MkdirAll(config.Dir, 0755)
@@ -130,7 +130,7 @@ func setup(config *Config) (*User, error) {
 			return nil, fmt.Errorf("Cannot read and save credentials: %s", err.Error())
 		}
 
-		return &User{Username: username, Password: password}, nil
+		return &UserCredentials{Username: username, Password: password}, nil
 	}
 	c, err := ioutil.ReadFile(credentialsFilename)
 	if err != nil {
@@ -138,14 +138,14 @@ func setup(config *Config) (*User, error) {
 	}
 	parts := strings.Split(string(c), ":")
 	if len(parts) == 2 {
-		return &User{Username: parts[0], Password: parts[1]}, nil
+		return &UserCredentials{Username: parts[0], Password: parts[1]}, nil
 	}
 	// read credentials and save
 	username, password, err := readAndSaveUserCredentials(credentialsFilename)
 	if err != nil {
 		return nil, fmt.Errorf("Cannot read and save credentials: %s", err.Error())
 	}
-	return &User{Username: username, Password: password}, nil
+	return &UserCredentials{Username: username, Password: password}, nil
 }
 
 func readAndSaveUserCredentials(credentialsFilename string) (username, password string, err error) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func addUser(config *Config, user *User) (*User, error) {
+func addUser(auth *Auth) (*User, error) {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("Please provide new user details")
 	fmt.Print("Enter username: ")
@@ -24,14 +24,11 @@ func addUser(config *Config, user *User) (*User, error) {
 	password = strings.TrimSpace(password)
 	newUser := &User{Username: username, Password: password}
 
-	auth := Auth{}
-	auth.Config = config
-	auth.User = user
 	token, err := auth.GetToken(false)
 	if err != nil {
 		return nil, fmt.Errorf("%s\n", err.Error())
 	}
-	api := API{config}
+	api := API{auth.Config.APIHost}
 	err = api.UserAdd(token, newUser)
 	if err != nil {
 		return nil, fmt.Errorf("%s\n", err.Error())
@@ -40,16 +37,12 @@ func addUser(config *Config, user *User) (*User, error) {
 	return newUser, nil
 }
 
-func addLink(config *Config, user *User, link *Link) (*Link, error) {
-	auth := Auth{}
-	auth.Config = config
-	auth.User = user
+func addLink(auth *Auth, link *Link) (*Link, error) {
 	token, err := auth.GetToken(false)
 	if err != nil {
 		return nil, fmt.Errorf("%s\n", err.Error())
 	}
-	api := API{config}
-	//link.UserId = auth.UserId
+	api := API{auth.Config.APIHost}
 	_, err = api.LinkAdd(token, link)
 	if err != nil {
 		return nil, fmt.Errorf("%s\n", err.Error())

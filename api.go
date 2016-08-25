@@ -9,12 +9,12 @@ import (
 
 // API struct to manager requests to remote
 type API struct {
-	Config *Config
+	Host string
 }
 
 // Auth sends an authentication request to remote and return token.
 func (a *API) Auth(username string, password string) (string, error) {
-	url := a.Config.APIHost + "user/login"
+	url := a.Host + "user/login"
 	user := User{Username: username, Password: password}
 	b := new(bytes.Buffer)
 	err := json.NewEncoder(b).Encode(user)
@@ -41,7 +41,7 @@ func (a *API) Auth(username string, password string) (string, error) {
 
 // UserAdd sends a request to remote to create new user.
 func (a *API) UserAdd(token string, newUser *User) error {
-	url := a.Config.APIHost + "user"
+	url := a.Host + "user"
 	b := new(bytes.Buffer)
 	err := json.NewEncoder(b).Encode(newUser)
 	if err != nil {
@@ -74,7 +74,7 @@ func (a *API) UserAdd(token string, newUser *User) error {
 // LinkAdd sends a request to create new link item.
 func (a *API) LinkAdd(token string, link *Link) (*Link, error) {
 	fmt.Println(link)
-	url := a.Config.APIHost + "item/link"
+	url := a.Host + "item/link"
 	b := new(bytes.Buffer)
 	err := json.NewEncoder(b).Encode(link)
 	if err != nil {
@@ -100,11 +100,9 @@ func (a *API) LinkAdd(token string, link *Link) (*Link, error) {
 		}
 		return nil, fmt.Errorf("API::ItemAdd failed: %s", res.Status, err.Error())
 	}
-	// If response is 200, parse response body into new item object
+	// TODO If response is 200, parse response body into new item object
 	bt := []byte{}
 	res.Body.Read(bt)
-	//fmt.Println(string(bt))
-	fmt.Println(res.StatusCode)
 
 	return nil, nil
 }

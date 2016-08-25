@@ -19,3 +19,9 @@ type UserAuth struct {
 type UserAuthUser struct {
 	ID string `json:"id"`
 }
+
+// UserCredentials current user credentials.
+type UserCredentials struct {
+	Username string
+	Password string
+}
