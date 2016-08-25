@@ -19,12 +19,20 @@ func main() {
 		return
 	}
 	dir := usr.HomeDir
-	config := &Config{Dir: dir + string(filepath.Separator) + ".lmc", AuthTokenFilename: "auth.token", CredentialsFilename: "credentials", APIHost: "http://localhost:8080/api/"}
+	config := &Config{
+		Dir: dir + string(filepath.Separator) + ".lmc",
+		AuthTokenFilename: "auth.token",
+		CredentialsFilename: "credentials",
+		APIHost: "http://localhost:8080/api/",
+	}
 	user, err := setup(config)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
 	}
+	auth := Auth{}
+	auth.Config = config
+	auth.User = user
 	// colors
 	green := color.New(color.FgGreen)
 	red := color.New(color.FgRed)
@@ -59,9 +67,6 @@ func main() {
 				blue.Printf("Parsed link: %v\n", link)
 			}
 		case "auth":
-			auth := Auth{}
-			auth.Config = config
-			auth.User = user
 			_, err := auth.GetToken(true)
 			if err != nil {
 				red.Printf("%v\n", err)
@@ -79,7 +84,6 @@ func main() {
 			blue.Println("Bye!")
 			return
 		default:
-			// https://www.youtube.com/watch?v=qFo3WsGijsI #nevzorov персонально ваш #youtube незоров [video]
 			if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
 				blue.Printf("We are going to add link %s\n", args[0])
 				link, err := ParseLink(args)
