@@ -7,9 +7,23 @@ import (
 	"net/http"
 )
 
+const (
+	// ErrUnauthorized API error code
+	ErrUnauthorized = 401
+)
+
 // API struct to manager requests to remote
 type API struct {
 	Host string
+}
+
+// APIError is a custom error, to handle exceptions outside API calls.
+type APIError struct {
+	code int
+}
+
+func (err *APIError) Error() string {
+	return fmt.Sprintf("%d", err.code)
 }
 
 // Auth sends an authentication request to remote and return token.
@@ -73,7 +87,6 @@ func (a *API) UserAdd(token string, newUser *User) error {
 
 // LinkAdd sends a request to create new link item.
 func (a *API) LinkAdd(token string, link *Link) (*Link, error) {
-	fmt.Println(link)
 	url := a.Host + "item/link"
 	b := new(bytes.Buffer)
 	err := json.NewEncoder(b).Encode(link)
@@ -99,6 +112,9 @@ func (a *API) LinkAdd(token string, link *Link) (*Link, error) {
 			return nil, fmt.Errorf("ItemAdd failed with status %s: %s", res.Status, err.Error())
 		}
 		return nil, fmt.Errorf("API::ItemAdd failed: %s", res.Status, err.Error())
+	}
+	if res.StatusCode == http.StatusUnauthorized {
+		return nil, &APIError{http.StatusUnauthorized}
 	}
 	// TODO If response is 200, parse response body into new item object
 	bt := []byte{}

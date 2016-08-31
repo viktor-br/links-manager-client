@@ -20,10 +20,10 @@ func main() {
 	}
 	dir := usr.HomeDir
 	config := &Config{
-		Dir: dir + string(filepath.Separator) + ".lmc",
-		AuthTokenFilename: "auth.token",
+		Dir:                 dir + string(filepath.Separator) + ".lmc",
+		AuthTokenFilename:   "auth.token",
 		CredentialsFilename: "credentials",
-		APIHost: "http://localhost:8080/api/",
+		APIHost:             "http://localhost:8080/api/",
 	}
 	userCredentials, err := setup(config)
 	if err != nil {
@@ -67,11 +67,11 @@ func main() {
 				blue.Printf("Parsed link: %v\n", link)
 			}
 		case "auth":
-			_, err := auth.GetToken(true)
+			_, err := auth.Authenticate()
 			if err != nil {
 				red.Printf("%v\n", err)
 			} else {
-				green.Printf("Authorised OK. User ID: %s\n", auth.UserAuth.User.ID)
+				green.Println("Authorised OK")
 			}
 		case "credentials":
 			_, _, err = readAndSaveUserCredentials(config.Dir + string(filepath.Separator) + config.CredentialsFilename)
@@ -85,18 +85,17 @@ func main() {
 			return
 		default:
 			if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
-				blue.Printf("We are going to add link %s\n", args[0])
 				link, err := ParseLink(args)
 				if err != nil {
 					red.Printf("%v\n", err)
 				} else {
 					switch link.(type) {
 					case *Link:
-						link, err := addLink(&auth, link.(*Link))
+						_, err := addLink(&auth, link.(*Link))
 						if err == nil {
-							blue.Printf("Item created %v\n", link)
+							green.Printf("AddLink for %s scheduled\n", args[0])
 						} else {
-							red.Printf("%v\n", err)
+							red.Printf("Parsed link: %v\n", err)
 						}
 					default:
 						red.Println("Unknown item type: %v", link)

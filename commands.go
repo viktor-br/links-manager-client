@@ -24,29 +24,44 @@ func addUser(auth *Auth) (*User, error) {
 	password = strings.TrimSpace(password)
 	newUser := &User{Username: username, Password: password}
 
-	token, err := auth.GetToken(false)
-	if err != nil {
-		return nil, fmt.Errorf("%s\n", err.Error())
-	}
 	api := API{auth.Config.APIHost}
-	err = api.UserAdd(token, newUser)
-	if err != nil {
-		return nil, fmt.Errorf("%s\n", err.Error())
-	}
+	err = authenticateWrapper(auth, func(token string) error {
+		err = api.UserAdd(token, newUser)
 
-	return newUser, nil
+		return err
+	})
+
+	return newUser, err
 }
 
 func addLink(auth *Auth, link *Link) (*Link, error) {
-	token, err := auth.GetToken(false)
-	if err != nil {
-		return nil, fmt.Errorf("%s\n", err.Error())
-	}
 	api := API{auth.Config.APIHost}
-	_, err = api.LinkAdd(token, link)
-	if err != nil {
-		return nil, fmt.Errorf("%s\n", err.Error())
-	}
+	err := authenticateWrapper(auth, func(token string) error {
+		_, err := api.LinkAdd(token, link)
 
-	return nil, nil
+		return err
+	})
+
+	return nil, err
+}
+
+func authenticateWrapper(auth *Auth, p func(string) error) error {
+	token, err := auth.GetToken()
+	if err != nil {
+		return err
+	}
+	err = p(token)
+	if err != nil {
+		if e, ok := err.(*APIError); ok {
+			if e.code == ErrUnauthorized {
+				token, err := auth.Authenticate()
+				if err != nil {
+					return err
+				}
+				return p(token)
+			}
+		}
+		return err
+	}
+	return nil
 }
