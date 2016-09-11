@@ -6,4 +6,6 @@ type Config struct {
 	AuthTokenFilename   string
 	CredentialsFilename string
 	APIHost             string
+	LogFilename         string
+	UncompletedJobsFile string
 }
