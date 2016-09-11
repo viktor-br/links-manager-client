@@ -2,9 +2,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/fatih/color"
+	"github.com/satori/go.uuid"
+	s "github.com/viktor-br/jobs-scheduler"
 	"io/ioutil"
+	"log"
 	"os"
 	u "os/user"
 	"path/filepath"
@@ -24,6 +29,8 @@ func main() {
 		AuthTokenFilename:   "auth.token",
 		CredentialsFilename: "credentials",
 		APIHost:             "http://localhost:8080/api/",
+		LogFilename:         "links-manager-client.log",
+		UncompletedJobsFile: "uncompleted-jobs.json",
 	}
 	userCredentials, err := setup(config)
 	if err != nil {
@@ -38,7 +45,82 @@ func main() {
 	red := color.New(color.FgRed)
 	blue := color.New(color.FgBlue)
 
+	var buf bytes.Buffer
+	// Init logger with output to file
+	f, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		fmt.Printf("Failed to open file: %v", err)
+		return
+	}
+	err = f.Truncate(0)
+	if err != nil {
+		fmt.Printf("Failed to clear log file: %v", err)
+		return
+	}
+	defer f.Close()
+
+	logger := log.New(&buf, "", log.Ldate|log.Ltime|log.LUTC)
+	logger.SetOutput(f)
+
+		unprocessedJobs := []Job{}
+
+	// Create scheduler with simple processor, which sleeps 3 seconds to emulate it's doing something.
+	// TODO check if worth it to use closure to pass authentication
+	scheduler := s.NewJobsScheduler(func(job s.Job) s.JobResult {
+		jobResult := JobResult{}
+		jobResult.job = job.(Job)
+		switch job.(type) {
+		case Job:
+			_, err := addLink(&auth, job.(Job).Link)
+			if err != nil {
+				jobResult.lastError = err
+			}
+		default:
+			jobResult.lastError = fmt.Errorf("Unknow job type #%s", job.GetID())
+		}
+		return jobResult
+	})
+	// Set up options
+	scheduler.Option(s.MaxTries(3), s.ProcessorsNum(2))
+	scheduler.AddLogger(func(msg string) {
+		logger.Println(msg)
+	})
+	// Add function which process results flow
+	scheduler.AddResultOutput(func(res s.JobResult) {
+		switch res.(type) {
+		case JobResult:
+			jobResult := res.(JobResult)
+			if !jobResult.IsDone() {
+				unprocessedJobs = append(unprocessedJobs, jobResult.job)
+				logger.Printf("job #%s failed: %s\n", res.GetJobID(), res.(JobResult).lastError.Error())
+			} else {
+				logger.Printf("job #%s successed\n", res.GetJobID())
+			}
+		default:
+			logger.Println("unknown result type")
+		}
+	})
+	scheduler.Run()
+
+	// Read previously saved uncompleted jobs from file
+	//savedJobs := map[string]Job{}
+	savedJobs := []Job{}
+	raw, err := ioutil.ReadFile(config.UncompletedJobsFile)
+	if err != nil {
+		fmt.Println("Cannot read uncompleted jobs file")
+	}
+	json.Unmarshal(raw, &savedJobs)
+
+	// Schedule uncompleted jobs
+	for _, v := range savedJobs {
+		err = scheduler.Add(v)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+	}
+
 	reader := bufio.NewReader(os.Stdin)
+Exit:
 	for {
 		blue.Print("cmd> ")
 		cmd, _ := reader.ReadString('\n')
@@ -58,14 +140,6 @@ func main() {
 			} else {
 				red.Printf("%v\n", err)
 			}
-		case "ia":
-			blue.Println("We are going to add link")
-			link, err := ParseLink(args[1:])
-			if err != nil {
-				red.Printf("%v\n", err)
-			} else {
-				blue.Printf("Parsed link: %v\n", link)
-			}
 		case "auth":
 			_, err := auth.Authenticate()
 			if err != nil {
@@ -81,9 +155,10 @@ func main() {
 				red.Printf("%v\n", err)
 			}
 		case "exit":
-			blue.Println("Bye!")
-			return
+			scheduler.Shutdown()
+			break Exit
 		default:
+			// If command starts with url, user wants to add link
 			if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
 				link, err := ParseLink(args)
 				if err != nil {
@@ -91,7 +166,8 @@ func main() {
 				} else {
 					switch link.(type) {
 					case *Link:
-						_, err := addLink(&auth, link.(*Link))
+						job := Job{ID: uuid.NewV4().String(), Link: link.(*Link)}
+						err := scheduler.Add(job)
 						if err == nil {
 							green.Printf("AddLink for %s scheduled\n", args[0])
 						} else {
@@ -103,6 +179,18 @@ func main() {
 				}
 			}
 		}
+	}
+
+	// When use input exit, wait scheduler will be completed
+	scheduler.Wait()
+
+	// Read from scheduler jobs, which were not processed and save to file
+	for _, j := range scheduler.GetUncompletedJobs() {
+		unprocessedJobs = append(unprocessedJobs, j.(Job))
+	}
+	b, err := json.Marshal(unprocessedJobs)
+	if err == nil {
+		ioutil.WriteFile(config.UncompletedJobsFile, b, 0644)
 	}
 }
 

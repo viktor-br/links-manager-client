@@ -2,10 +2,9 @@ Simple console client to work with links manager server https://github.com/vikto
 
 Commands
 
-Create new link, both variants are valid:
+Create new link:
 ```
 cmd> http://google.com #google #search powerful search server
-cmd> ia http://google.com #google #search powerful search server
 ```
 
 Create new user:
@@ -13,12 +12,12 @@ Create new user:
 cmd> ua
 ```
 
-Authenticate on remote server (receiving token with using credentials):
+Authenticate on remote server (receiving token with using saved credentials):
 ```
 cmd> auth
 ```
 
-Change credentials:
+Change saved credentials:
 ```
 cmd> credentials
 ```

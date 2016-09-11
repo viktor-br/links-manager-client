@@ -111,7 +111,7 @@ func (a *API) LinkAdd(token string, link *Link) (*Link, error) {
 			res.Body.Close()
 			return nil, fmt.Errorf("ItemAdd failed with status %s: %s", res.Status, err.Error())
 		}
-		return nil, fmt.Errorf("API::ItemAdd failed: %s", res.Status, err.Error())
+		return nil, fmt.Errorf("API::ItemAdd failed: %s", err.Error())
 	}
 	if res.StatusCode == http.StatusUnauthorized {
 		return nil, &APIError{http.StatusUnauthorized}
