@@ -11,9 +11,11 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/signal"
 	u "os/user"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"unicode"
 )
 
@@ -40,6 +42,7 @@ func main() {
 	auth := Auth{}
 	auth.Config = config
 	auth.UserCredentials = userCredentials
+
 	// colors
 	green := color.New(color.FgGreen)
 	red := color.New(color.FgRed)
@@ -62,10 +65,10 @@ func main() {
 	logger := log.New(&buf, "", log.Ldate|log.Ltime|log.LUTC)
 	logger.SetOutput(f)
 
-		unprocessedJobs := []Job{}
+	unprocessedJobs := []Job{}
 
 	// Create scheduler with simple processor, which sleeps 3 seconds to emulate it's doing something.
-	// TODO check if worth it to use closure to pass authentication
+	// TODO check if it worth it to use closure to pass authentication
 	scheduler := s.NewJobsScheduler(func(job s.Job) s.JobResult {
 		jobResult := JobResult{}
 		jobResult.job = job.(Job)
@@ -120,68 +123,86 @@ func main() {
 	}
 
 	reader := bufio.NewReader(os.Stdin)
-Exit:
-	for {
-		blue.Print("cmd> ")
-		cmd, _ := reader.ReadString('\n')
-		cmd = strings.TrimSpace(cmd)
-		args := strings.FieldsFunc(cmd, func(c rune) bool {
-			return unicode.IsSpace(c)
-		})
-		if len(args) == 0 {
-			continue
-		}
-		// Identify command by first argument
-		switch strings.TrimSpace(args[0]) {
-		case "ua":
-			newUser, err := addUser(&auth)
-			if err == nil {
-				blue.Printf("User created %v\n", newUser)
-			} else {
-				red.Printf("%v\n", err)
+	// Buffer = 1 b/c no need to block the goroutine.
+	signalsDone := make(chan bool, 1)
+	// Wait for Ctrl+C close signal
+	go func(scheduler *s.JobsScheduler, signalsDone chan bool) {
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+		<-signals
+		fmt.Println()
+		scheduler.Shutdown()
+		signalsDone <- true
+	}(scheduler, signalsDone)
+
+	// Command line goroutine, read and run command
+	go func(scheduler *s.JobsScheduler) {
+	Exit:
+		for {
+			blue.Print("cmd> ")
+			cmd, _ := reader.ReadString('\n')
+			cmd = strings.TrimSpace(cmd)
+			args := strings.FieldsFunc(cmd, func(c rune) bool {
+				return unicode.IsSpace(c)
+			})
+			if len(args) == 0 {
+				continue
 			}
-		case "auth":
-			_, err := auth.Authenticate()
-			if err != nil {
-				red.Printf("%v\n", err)
-			} else {
-				green.Println("Authorised OK")
-			}
-		case "credentials":
-			_, _, err = readAndSaveUserCredentials(config.Dir + string(filepath.Separator) + config.CredentialsFilename)
-			if err == nil {
-				blue.Println("Credentials saved")
-			} else {
-				red.Printf("%v\n", err)
-			}
-		case "exit":
-			scheduler.Shutdown()
-			break Exit
-		default:
-			// If command starts with url, user wants to add link
-			if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
-				link, err := ParseLink(args)
+			// Identify command by first argument
+			switch strings.TrimSpace(args[0]) {
+			case "ua":
+				newUser, err := addUser(&auth)
+				if err == nil {
+					blue.Printf("User created %v\n", newUser)
+				} else {
+					red.Printf("%v\n", err)
+				}
+			case "auth":
+				_, err := auth.Authenticate()
 				if err != nil {
 					red.Printf("%v\n", err)
 				} else {
-					switch link.(type) {
-					case *Link:
-						job := Job{ID: uuid.NewV4().String(), Link: link.(*Link)}
-						err := scheduler.Add(job)
-						if err == nil {
-							green.Printf("AddLink for %s scheduled\n", args[0])
-						} else {
-							red.Printf("Parsed link: %v\n", err)
+					green.Println("Authorised OK")
+				}
+			case "credentials":
+				_, _, err = readAndSaveUserCredentials(config.Dir + string(filepath.Separator) + config.CredentialsFilename)
+				if err == nil {
+					blue.Println("Credentials saved")
+				} else {
+					red.Printf("%v\n", err)
+				}
+			case "exit":
+				scheduler.Shutdown()
+				signalsDone <- true
+				break Exit
+			default:
+				// If command starts with url, user wants to add link
+				if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
+					link, err := ParseLink(args)
+					if err != nil {
+						red.Printf("%v\n", err)
+					} else {
+						switch link.(type) {
+						case *Link:
+							job := Job{ID: uuid.NewV4().String(), Link: link.(*Link)}
+							err := scheduler.Add(job)
+							if err == nil {
+								green.Printf("AddLink for %s scheduled\n", args[0])
+							} else {
+								red.Printf("Parsed link: %v\n", err)
+							}
+						default:
+							red.Println("Unknown item type: %v", link)
 						}
-					default:
-						red.Println("Unknown item type: %v", link)
 					}
 				}
 			}
 		}
-	}
+	}(scheduler)
 
-	// When use input exit, wait scheduler will be completed
+	<-signalsDone
+
+	// When use input exit, wait the scheduler completion
 	scheduler.Wait()
 
 	// Read from scheduler jobs, which were not processed and save to file
