@@ -45,6 +45,7 @@ func addLink(auth *Auth, link *Link) (*Link, error) {
 	return nil, err
 }
 
+// authenticateWrapper add feature of re-authentication in case of HTTP error 401
 func authenticateWrapper(auth *Auth, p func(string) error) error {
 	token, err := auth.GetToken()
 	if err != nil {

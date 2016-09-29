@@ -27,12 +27,12 @@ func main() {
 	}
 	dir := usr.HomeDir
 	config := &Config{
-		Dir:                 dir + string(filepath.Separator) + ".lmc",
-		AuthTokenFilename:   "auth.token",
-		CredentialsFilename: "credentials",
-		APIHost:             "http://localhost:8080/api/",
-		LogFilename:         "links-manager-client.log",
-		UncompletedJobsFile: "uncompleted-jobs.json",
+		Dir:                     dir + string(filepath.Separator) + ".lmc",
+		AuthTokenFilename:       "auth.token",
+		CredentialsFilename:     "credentials",
+		APIHost:                 "http://localhost:8080/api/",
+		LogFilename:             "links-manager-client.log",
+		UncompletedJobsFilename: "uncompleted-jobs.json",
 	}
 	userCredentials, err := setup(config)
 	if err != nil {
@@ -50,7 +50,7 @@ func main() {
 
 	var buf bytes.Buffer
 	// Init logger with output to file
-	f, err := os.OpenFile(config.LogFilename, os.O_CREATE|os.O_RDWR, 0666)
+	f, err := os.OpenFile(config.LogPath(), os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
 		fmt.Printf("Failed to open file: %v", err)
 		return
@@ -108,7 +108,7 @@ func main() {
 	// Read previously saved uncompleted jobs from file
 	//savedJobs := map[string]Job{}
 	savedJobs := []Job{}
-	raw, err := ioutil.ReadFile(config.UncompletedJobsFile)
+	raw, err := ioutil.ReadFile(config.UncompletedJobsPath())
 	if err != nil {
 		fmt.Println("Cannot read uncompleted jobs file")
 	}
@@ -165,7 +165,7 @@ func main() {
 					green.Println("Authorised OK")
 				}
 			case "credentials":
-				_, _, err = readAndSaveUserCredentials(config.Dir + string(filepath.Separator) + config.CredentialsFilename)
+				_, _, err = readAndSaveUserCredentials(config.CredentialsPath())
 				if err == nil {
 					blue.Println("Credentials saved")
 				} else {
@@ -211,7 +211,7 @@ func main() {
 	}
 	b, err := json.Marshal(unprocessedJobs)
 	if err == nil {
-		ioutil.WriteFile(config.UncompletedJobsFile, b, 0644)
+		ioutil.WriteFile(config.UncompletedJobsPath(), b, 0644)
 	}
 }
 
@@ -224,8 +224,8 @@ func setup(config *Config) (*UserCredentials, error) {
 		}
 	}
 	// Create auth token file
-	authTokenFilename := config.Dir + string(filepath.Separator) + config.AuthTokenFilename
-	credentialsFilename := config.Dir + string(filepath.Separator) + config.CredentialsFilename
+	authTokenFilename := config.AuthTokenPath()
+	credentialsFilename := config.CredentialsPath()
 	if _, err := os.Stat(authTokenFilename); os.IsNotExist(err) {
 		err = ioutil.WriteFile(authTokenFilename, []byte{}, 0600)
 		if err != nil {
