@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 	"unicode"
 )
 
@@ -66,6 +67,8 @@ func main() {
 	logger.SetOutput(f)
 
 	unprocessedJobs := []Job{}
+	jobs := make(chan Job, 10)
+	noConnection := make(chan bool)
 
 	// Create scheduler with simple processor, which sleeps 3 seconds to emulate it's doing something.
 	// TODO check if it worth it to use closure to pass authentication
@@ -96,6 +99,10 @@ func main() {
 			if !jobResult.IsDone() {
 				unprocessedJobs = append(unprocessedJobs, jobResult.job)
 				logger.Printf("job #%s failed: %s\n", res.GetJobID(), res.(JobResult).lastError.Error())
+				// Send signal, connection failed, so we need to stop send requests and wait reestablishing connection.
+				if jobResult.ConnectionFailed() {
+					noConnection <- true
+				}
 			} else {
 				logger.Printf("job #%s successed\n", res.GetJobID())
 			}
@@ -106,7 +113,6 @@ func main() {
 	scheduler.Run()
 
 	// Read previously saved uncompleted jobs from file
-	//savedJobs := map[string]Job{}
 	savedJobs := []Job{}
 	raw, err := ioutil.ReadFile(config.UncompletedJobsPath())
 	if err != nil {
@@ -134,6 +140,9 @@ func main() {
 		scheduler.Shutdown()
 		signalsDone <- true
 	}(scheduler, signalsDone)
+
+	// Run separate goroutine, which accepts a job and forward it either to scheduler or to local storage.
+	go schedule(&auth, scheduler, noConnection, jobs)
 
 	// Command line goroutine, read and run command
 	go func(scheduler *s.JobsScheduler) {
@@ -184,13 +193,7 @@ func main() {
 					} else {
 						switch link.(type) {
 						case *Link:
-							job := Job{ID: uuid.NewV4().String(), Link: link.(*Link)}
-							err := scheduler.Add(job)
-							if err == nil {
-								green.Printf("AddLink for %s scheduled\n", args[0])
-							} else {
-								red.Printf("Parsed link: %v\n", err)
-							}
+							jobs <- Job{ID: uuid.NewV4().String(), Link: link.(*Link)}
 						default:
 							red.Println("Unknown item type: %v", link)
 						}
@@ -215,6 +218,57 @@ func main() {
 	}
 }
 
+func schedule(auth *Auth, scheduler *s.JobsScheduler, noConnection chan bool, jobs chan Job) {
+	successChan := make(chan bool)
+	connectionFailed := false
+	green := color.New(color.FgGreen)
+	red := color.New(color.FgRed)
+
+	for {
+		select {
+		case <-noConnection:
+			// Ignore a channel failure while processing a previous one still in progress.
+			if !connectionFailed {
+				connectionFailed = true
+				// Run goroutine to periodically check if the server is available.
+				go waitForServerAvailable(auth, successChan)
+			}
+		case <-successChan:
+			connectionFailed = true
+			// TODO Now we can read jobs from local storage and resend.
+		case job := <-jobs:
+			if connectionFailed {
+				// TODO Save to the local storage
+			} else {
+				// Send the job to the scheduler
+				err := scheduler.Add(job)
+				if err == nil {
+					green.Printf("AddLink for %s scheduled\n", job.Link)
+				} else {
+					red.Printf("Parsed link: %v\n", err)
+				}
+			}
+		}
+	}
+}
+
+// waitForServerAvailable requests a server endpoint and exit in case the server is available.
+func waitForServerAvailable(auth *Auth, success chan bool) {
+	timeout := 15 * time.Second
+	defer func() {
+		success <- true
+	}()
+	for {
+		if checkConnection(auth) {
+			break
+		} else {
+			time.Sleep(timeout)
+			timeout = timeout * 2
+		}
+	}
+}
+
+// setup creates required files and read data from the previously saved files (log, credentials and authentication info).
 func setup(config *Config) (*UserCredentials, error) {
 	// Check if folder exists
 	if _, err := os.Stat(config.Dir); os.IsNotExist(err) {
@@ -256,6 +310,7 @@ func setup(config *Config) (*UserCredentials, error) {
 	return &UserCredentials{Username: username, Password: password}, nil
 }
 
+// readAndSaveUserCredentials requests credentials from user and save to the file.
 func readAndSaveUserCredentials(credentialsFilename string) (username, password string, err error) {
 	blue := color.New(color.FgBlue)
 	// Read credentials and save

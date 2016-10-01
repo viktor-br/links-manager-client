@@ -2,7 +2,7 @@ package main
 
 // Job test job, which should implements required method GetID() string
 type Job struct {
-	ID string
+	ID   string
 	Link *Link
 }
 
@@ -11,7 +11,7 @@ type Job struct {
 // and no need to restart the job.
 type JobResult struct {
 	lastError error
-	job Job
+	job       Job
 }
 
 // GetID implement Job interface
@@ -31,5 +31,13 @@ func (jobResult JobResult) IsDone() bool {
 
 // IsCorrupted implement JobResult interface
 func (jobResult JobResult) IsCorrupted() bool {
+	return false
+}
+
+// ConnectionFailed indicates if connection failed.
+func (jobResult JobResult) ConnectionFailed() bool {
+	if e, ok := jobResult.lastError.(*APIError); ok {
+		return e.code >= 400
+	}
 	return false
 }

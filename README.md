@@ -1,4 +1,4 @@
-Simple console client to work with links manager server https://github.com/viktor-br/links-manager
+Simple console client to work with the links manager server https://github.com/viktor-br/links-manager
 
 Commands
 
@@ -22,7 +22,7 @@ Change saved credentials:
 cmd> credentials
 ```
 
-Exit:
+Exit (or Ctrl+C):
 ```
 cmd> exit
 ```
