@@ -45,7 +45,7 @@ func addLink(auth *Auth, link *Link) (*Link, error) {
 	return nil, err
 }
 
-func checkConnection(auth *Auth) (bool, error) {
+func checkConnection(auth *Auth) bool {
 	api := API{auth.Config.APIHost}
 	return api.Ping()
 }

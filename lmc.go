@@ -184,6 +184,12 @@ func main() {
 				scheduler.Shutdown()
 				signalsDone <- true
 				break Exit
+			case "ping":
+				if checkConnection(&auth) {
+					green.Println("Ok: server is available")
+				} else {
+					red.Println("Failed: server is not available")
+				}
 			default:
 				// If command starts with url, user wants to add link
 				if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
@@ -205,7 +211,6 @@ func main() {
 
 	<-signalsDone
 
-	// When use input exit, wait the scheduler completion
 	scheduler.Wait()
 
 	// Read from scheduler jobs, which were not processed and save to file

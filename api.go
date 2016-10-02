@@ -124,7 +124,13 @@ func (a *API) LinkAdd(token string, link *Link) (*Link, error) {
 }
 
 // Ping sends request to special endpoint to check if server is available.
-// TODO implement from both sides.
-func (a *API) Ping() (bool, error) {
-	return true, nil
+func (a *API) Ping() bool {
+	url := a.Host + "ping"
+	resp, _ := http.Get(url) // if error occurred, ping failed, no need to know why
+	if resp != nil {
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}
+
+	return false
 }
