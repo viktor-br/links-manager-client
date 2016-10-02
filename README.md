@@ -22,6 +22,11 @@ Change saved credentials:
 cmd> credentials
 ```
 
+Ping (check if server is available):
+```
+cmd> ping
+```
+
 Exit (or Ctrl+C):
 ```
 cmd> exit
