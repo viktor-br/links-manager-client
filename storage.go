@@ -83,7 +83,11 @@ func (storage *SqliteStorage) Get(id string) ([]byte, error) {
 	defer stmt.Close()
 
 	var data []byte
-	err = stmt.QueryRow(id).Scan(&data)
+	row := stmt.QueryRow(id)
+	if row == nil {
+		return nil, nil
+	}
+	row.Scan(&data)
 	if err != nil {
 		return nil, fmt.Errorf("Storage: GET %s, prepare statement failed. %s", id, err.Error())
 	}
@@ -93,6 +97,23 @@ func (storage *SqliteStorage) Get(id string) ([]byte, error) {
 
 // Remove job from the storage by id
 func (storage *SqliteStorage) Remove(id string) error {
+	db, err := sql.Open("sqlite3", storage.dbPath)
+	if err != nil {
+		return fmt.Errorf("Storage: REMOVE %s, open db failed. %s", id, err.Error())
+	}
+	defer db.Close()
+
+	stmt, err := db.Prepare("DELETE FROM jobs WHERE id = ?")
+	if err != nil {
+		return fmt.Errorf("Storage: REMOVE %s, prepare statement failed. %s", id, err.Error())
+	}
+	defer stmt.Close()
+
+	_, err = stmt.Exec(id)
+	if err != nil {
+		return fmt.Errorf("Storage: REMOVE %s, delete query failed. %s", id, err.Error())
+	}
+
 	return nil
 }
 
