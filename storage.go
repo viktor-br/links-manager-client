@@ -1,9 +1,9 @@
 package main
 
 import (
-	_ "github.com/mattn/go-sqlite3"
 	"database/sql"
 	"fmt"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Storage interface provides methods to use for other code of app, so it doesn't depend on storage implementation.
@@ -137,4 +137,3 @@ func NewStorage(dbPath string) (Storage, error) {
 
 	return &storage, nil
 }
-
