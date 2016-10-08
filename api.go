@@ -22,8 +22,17 @@ type APIError struct {
 	code int
 }
 
+// APIConnectionFailed is an error of no connection.
+type APIConnectionFailed struct {
+	msg string
+}
+
 func (err *APIError) Error() string {
 	return fmt.Sprintf("%d", err.code)
+}
+
+func (err *APIConnectionFailed) Error() string {
+	return err.msg
 }
 
 // Auth sends an authentication request to remote and return token.
@@ -111,7 +120,7 @@ func (a *API) LinkAdd(token string, link *Link) (*Link, error) {
 			res.Body.Close()
 			return nil, fmt.Errorf("ItemAdd failed with status %s: %s", res.Status, err.Error())
 		}
-		return nil, fmt.Errorf("API::ItemAdd failed: %s", err.Error())
+		return nil, &APIConnectionFailed{err.Error()}
 	}
 	if res.StatusCode == http.StatusUnauthorized {
 		return nil, &APIError{http.StatusUnauthorized}
@@ -121,4 +130,16 @@ func (a *API) LinkAdd(token string, link *Link) (*Link, error) {
 	res.Body.Read(bt)
 
 	return nil, nil
+}
+
+// Ping sends request to special endpoint to check if server is available.
+func (a *API) Ping() bool {
+	url := a.Host + "ping"
+	resp, _ := http.Get(url) // if error occurred, ping failed, no need to know why
+	if resp != nil {
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}
+
+	return false
 }
