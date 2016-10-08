@@ -1,5 +1,7 @@
 package main
 
+import "net/http"
+
 // Job test job, which should implements required method GetID() string
 type Job struct {
 	ID   string
@@ -34,10 +36,17 @@ func (jobResult JobResult) IsCorrupted() bool {
 	return false
 }
 
-// ConnectionFailed indicates if connection failed.
+// ConnectionFailed indicates if connection failed or service unavailable. In both cases need to retry the job.
 func (jobResult JobResult) ConnectionFailed() bool {
-	if e, ok := jobResult.lastError.(*APIError); ok {
-		return e.code >= 400
+	res := false
+	switch t := jobResult.lastError.(type) {
+	case *APIConnectionFailed:
+		res = true
+	case *APIError:
+		if t.code >= http.StatusInternalServerError {
+			res = true
+		}
 	}
-	return false
+
+	return res
 }

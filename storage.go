@@ -11,7 +11,7 @@ type Storage interface {
 	Put(string, []byte) error
 	Get(string) ([]byte, error)
 	Remove(string) error
-	Next() ([]byte, error)
+	ReadAll() ([][]byte, error)
 }
 
 // SqliteStorage embedded storage.
@@ -54,7 +54,7 @@ func (storage *SqliteStorage) Put(id string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("Storage: PUT %s, create transaction failed. %s", id, err.Error())
 	}
-	stmt, err := tx.Prepare("INSERT INTO jobs(id, addedAt, data) VALUES(?, datetime('now'), ?)")
+	stmt, err := tx.Prepare("INSERT OR IGNORE INTO jobs(id, addedAt, data) VALUES(?, datetime('now'), ?)")
 	if err != nil {
 		return fmt.Errorf("Storage: PUT %s, unable to prepare statement. %s", id, err.Error())
 	}
@@ -63,7 +63,10 @@ func (storage *SqliteStorage) Put(id string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("Storage: PUT %s, execute failed. %s", id, err.Error())
 	}
-	tx.Commit()
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("Storage: PUT %s, the transaction commit failed. %s", id, err.Error())
+	}
 
 	return nil
 }
@@ -117,14 +120,38 @@ func (storage *SqliteStorage) Remove(id string) error {
 	return nil
 }
 
-// Next returns any item needs to be processed.
-func (storage *SqliteStorage) Next() ([]byte, error) {
-	return nil, nil
+// ReadAll returns any item needs to be processed.
+func (storage *SqliteStorage) ReadAll() ([][]byte, error) {
+	var result [][]byte
+	db, err := sql.Open("sqlite3", storage.dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("Storage: READALL, open db failed. %s", err.Error())
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT data FROM jobs ORDER BY addedAt")
+	if err != nil {
+		return nil, fmt.Errorf("Storage: READALL, query failed. %s", err.Error())
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var data []byte
+		err = rows.Scan(&data)
+		if err != nil {
+			return nil, fmt.Errorf("Storage: READALL, failed to scan. %s", err.Error())
+		}
+		result = append(result, data)
+	}
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("Storage: READALL, reading data failed. %s", err.Error())
+	}
+
+	return result, nil
 }
 
 // NewStorage create new storage entity.
 func NewStorage(dbPath string) (Storage, error) {
-
 	if dbPath == "" {
 		return nil, fmt.Errorf("Storage: please provide non-empty path to the storage")
 	}

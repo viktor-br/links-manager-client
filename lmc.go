@@ -8,7 +8,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/satori/go.uuid"
 	s "github.com/viktor-br/jobs-scheduler"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -28,12 +27,12 @@ func main() {
 	}
 	dir := usr.HomeDir
 	config := &Config{
-		Dir:                     dir + string(filepath.Separator) + ".lmc",
-		AuthTokenFilename:       "auth.token",
-		CredentialsFilename:     "credentials",
-		APIHost:                 "http://localhost:8080/api/",
-		LogFilename:             "links-manager-client.log",
-		UncompletedJobsFilename: "uncompleted-jobs.json",
+		Dir:                 dir + string(filepath.Separator) + ".lmc",
+		AuthTokenFilename:   "auth.token",
+		CredentialsFilename: "credentials",
+		APIHost:             "http://localhost:8080/api/",
+		LogFilename:         "links-manager-client.log",
+		StorageName:         "lmc.db",
 	}
 	userCredentials, err := setup(config)
 	if err != nil {
@@ -43,6 +42,11 @@ func main() {
 	auth := Auth{}
 	auth.Config = config
 	auth.UserCredentials = userCredentials
+
+	storage, err := NewStorage(config.StoragePath())
+	if err != nil {
+		fmt.Printf("Storage opening failed %s", err.Error())
+	}
 
 	// colors
 	green := color.New(color.FgGreen)
@@ -66,7 +70,6 @@ func main() {
 	logger := log.New(&buf, "", log.Ldate|log.Ltime|log.LUTC)
 	logger.SetOutput(f)
 
-	unprocessedJobs := []Job{}
 	jobs := make(chan Job, 10)
 	noConnection := make(chan bool)
 
@@ -96,14 +99,15 @@ func main() {
 		switch res.(type) {
 		case JobResult:
 			jobResult := res.(JobResult)
+			logger.Printf("JobResult received: %v", jobResult)
 			if !jobResult.IsDone() {
-				unprocessedJobs = append(unprocessedJobs, jobResult.job)
-				logger.Printf("job #%s failed: %s\n", res.GetJobID(), res.(JobResult).lastError.Error())
+				logger.Printf("job #%s is not done: %s\n", res.GetJobID(), res.(JobResult).lastError.Error())
 				// Send signal, connection failed, so we need to stop send requests and wait reestablishing connection.
 				if jobResult.ConnectionFailed() {
 					noConnection <- true
 				}
 			} else {
+				storage.Remove(res.GetJobID())
 				logger.Printf("job #%s successed\n", res.GetJobID())
 			}
 		default:
@@ -113,20 +117,7 @@ func main() {
 	scheduler.Run()
 
 	// Read previously saved uncompleted jobs from file
-	savedJobs := []Job{}
-	raw, err := ioutil.ReadFile(config.UncompletedJobsPath())
-	if err != nil {
-		fmt.Println("Cannot read uncompleted jobs file")
-	}
-	json.Unmarshal(raw, &savedJobs)
-
-	// Schedule uncompleted jobs
-	for _, v := range savedJobs {
-		err = scheduler.Add(v)
-		if err != nil {
-			fmt.Println(err.Error())
-		}
-	}
+	readAllSavedJobsAndSchedule(scheduler, storage)
 
 	reader := bufio.NewReader(os.Stdin)
 	// Buffer = 1 b/c no need to block the goroutine.
@@ -142,7 +133,7 @@ func main() {
 	}(scheduler, signalsDone)
 
 	// Run separate goroutine, which accepts a job and forward it either to scheduler or to local storage.
-	go schedule(&auth, scheduler, noConnection, jobs)
+	go schedule(&auth, scheduler, noConnection, jobs, storage)
 
 	// Command line goroutine, read and run command
 	go func(scheduler *s.JobsScheduler) {
@@ -212,18 +203,30 @@ func main() {
 	<-signalsDone
 
 	scheduler.Wait()
+}
 
-	// Read from scheduler jobs, which were not processed and save to file
-	for _, j := range scheduler.GetUncompletedJobs() {
-		unprocessedJobs = append(unprocessedJobs, j.(Job))
+func readAllSavedJobsAndSchedule(scheduler *s.JobsScheduler, storage Storage) {
+	savedJobs := []Job{}
+	savedJobsData, err := storage.ReadAll()
+	if err != nil {
+		fmt.Println("Cannot read uncompleted jobs from storage %s", err.Error())
 	}
-	b, err := json.Marshal(unprocessedJobs)
-	if err == nil {
-		ioutil.WriteFile(config.UncompletedJobsPath(), b, 0644)
+	for i := 0; i < len(savedJobsData); i++ {
+		savedJob := Job{}
+		json.Unmarshal(savedJobsData[i], &savedJob)
+		savedJobs = append(savedJobs, savedJob)
+	}
+
+	// Schedule uncompleted jobs
+	for _, v := range savedJobs {
+		err = scheduler.Add(v)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
 	}
 }
 
-func schedule(auth *Auth, scheduler *s.JobsScheduler, noConnection chan bool, jobs chan Job) {
+func schedule(auth *Auth, scheduler *s.JobsScheduler, noConnection chan bool, jobs chan Job, storage Storage) {
 	successChan := make(chan bool)
 	connectionFailed := false
 	green := color.New(color.FgGreen)
@@ -239,12 +242,17 @@ func schedule(auth *Auth, scheduler *s.JobsScheduler, noConnection chan bool, jo
 				go waitForServerAvailable(auth, successChan)
 			}
 		case <-successChan:
-			connectionFailed = true
-			// TODO Now we can read jobs from local storage and resend.
+			connectionFailed = false
+			readAllSavedJobsAndSchedule(scheduler, storage)
 		case job := <-jobs:
-			if connectionFailed {
-				// TODO Save to the local storage
+			// Save job to storage, in case connection failed, we could restart jobs
+			b, err := json.Marshal(job)
+			if err != nil {
+				// TODO write to log file
 			} else {
+				storage.Put(job.ID, b)
+			}
+			if !connectionFailed {
 				// Send the job to the scheduler
 				err := scheduler.Add(job)
 				if err == nil {
@@ -271,86 +279,4 @@ func waitForServerAvailable(auth *Auth, success chan bool) {
 			timeout = timeout * 2
 		}
 	}
-}
-
-// setup creates required files and read data from the previously saved files (log, credentials and authentication info).
-func setup(config *Config) (*UserCredentials, error) {
-	// Check if folder exists
-	if _, err := os.Stat(config.Dir); os.IsNotExist(err) {
-		err = os.MkdirAll(config.Dir, 0755)
-		if err != nil {
-			return nil, fmt.Errorf("Configuration folder %s could not be created: %s", config.Dir, err.Error())
-		}
-	}
-	// Create auth token file
-	authTokenFilename := config.AuthTokenPath()
-	credentialsFilename := config.CredentialsPath()
-	if _, err := os.Stat(authTokenFilename); os.IsNotExist(err) {
-		err = ioutil.WriteFile(authTokenFilename, []byte{}, 0600)
-		if err != nil {
-			return nil, fmt.Errorf("Could not create token file %s: %s", authTokenFilename, err.Error())
-		}
-	}
-	if _, err := os.Stat(credentialsFilename); os.IsNotExist(err) {
-		username, password, err := readAndSaveUserCredentials(credentialsFilename)
-		if err != nil {
-			return nil, fmt.Errorf("Cannot read and save credentials: %s", err.Error())
-		}
-
-		return &UserCredentials{Username: username, Password: password}, nil
-	}
-	c, err := ioutil.ReadFile(credentialsFilename)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to read data from the credentials file: %s", err.Error())
-	}
-	parts := strings.Split(string(c), ":")
-	if len(parts) == 2 {
-		return &UserCredentials{Username: parts[0], Password: parts[1]}, nil
-	}
-	// read credentials and save
-	username, password, err := readAndSaveUserCredentials(credentialsFilename)
-	if err != nil {
-		return nil, fmt.Errorf("Cannot read and save credentials: %s", err.Error())
-	}
-	return &UserCredentials{Username: username, Password: password}, nil
-}
-
-// readAndSaveUserCredentials requests credentials from user and save to the file.
-func readAndSaveUserCredentials(credentialsFilename string) (username, password string, err error) {
-	blue := color.New(color.FgBlue)
-	// Read credentials and save
-	reader := bufio.NewReader(os.Stdin)
-	blue.Println("Please provide your credentials")
-	fmt.Print("Enter username: ")
-	username, err = reader.ReadString('\n')
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to read username from console: %s", err.Error())
-	}
-	fmt.Print("Enter password: ")
-	password, err = reader.ReadString('\n')
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to read password from console: %s", err.Error())
-	}
-	username = strings.TrimSpace(username)
-	password = strings.TrimSpace(password)
-
-	f, err := os.Create(credentialsFilename)
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to create credentials file: %s", err.Error())
-	}
-	defer f.Close()
-	err = f.Chmod(0600)
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to set permissions to the credentials file: %s", err.Error())
-	}
-	err = f.Truncate(0)
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to clear credentials file: %s", err.Error())
-	}
-	_, err = f.WriteString(strings.Join([]string{strings.TrimSpace(username), strings.TrimSpace(password)}, ":"))
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to write data to the credentials file: %s", err.Error())
-	}
-
-	return
 }
